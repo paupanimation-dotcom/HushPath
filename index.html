@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>HUSHPATH</title>
+    
+    <!-- PWA / iOS Standalone Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HUSHPATH">
+    
+    <!-- Import VT323 to simulate the BIOS/Terminal look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"VT323"', 'monospace'], 
+              serif: ['"VT323"', 'monospace'],
+              mono: ['"VT323"', 'monospace'],
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.5s ease-out forwards',
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'scanline': 'scanline 8s linear infinite',
+              'tremble': 'tremble 0.1s infinite',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0', transform: 'translateY(4px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              scanline: {
+                '0%': { transform: 'translateY(-100%)' },
+                '100%': { transform: 'translateY(100%)' },
+              },
+              tremble: {
+                '0%': { transform: 'translate(0, 0)' },
+                '25%': { transform: 'translate(0.5px, 0.5px)' },
+                '50%': { transform: 'translate(-0.5px, 0)' },
+                '75%': { transform: 'translate(0, -0.5px)' },
+                '100%': { transform: 'translate(0, 0)' },
+              }
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      :root { --app-height: 100%; }
+      body {
+        background-color: #000000;
+        color: #ffffff;
+        overscroll-behavior-y: none;
+        height: 100vh;
+        height: 100svh;
+        overflow: hidden;
+        font-family: 'VT323', monospace;
+        font-size: 20px;
+        line-height: 1.2;
+        image-rendering: pixelated;
+        -webkit-font-smoothing: none;
+      }
+      #root { height: 100%; display: flex; flex-direction: column; position: relative; }
+      
+      .custom-scrollbar::-webkit-scrollbar { width: 16px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: #000; border-left: 2px solid #333; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #aaa; border: 2px solid #000; box-shadow: inset -2px -2px 0px #555; }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #fff; }
+
+      .pattern-diagonal { background: repeating-linear-gradient(45deg, #fff, #fff 2px, #000 2px, #000 4px); }
+      .pattern-cross { background-image: linear-gradient(#fff 2px, transparent 2px), linear-gradient(90deg, #fff 2px, transparent 2px); background-size: 6px 6px; }
+      .pattern-dots { background-image: radial-gradient(#fff 2px, transparent 2px); background-size: 4px 4px; }
+      
+      button:active { transform: translateY(2px); }
+    </style>
+    <!-- Vite will bundle all JS/CSS into dist/assets.
+         IMPORTANT: use relative entry paths so Electron file:// builds work reliably. -->
+</head>
+  <body class="antialiased">
+    <div id="root"></div>
+  <script type="module" src="./index.tsx"></script>
+</body>
+</html>
