@@ -25,8 +25,14 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - name: Upgrade npm (avoids "Exit handler never called")
+        run: npm i -g npm@latest
+
+      - name: Install dependencies (include dev)
         run: npm install --include=dev --no-audit --no-fund
+        env:
+          NODE_ENV: development
+          NPM_CONFIG_PRODUCTION: "false"
 
       - name: Build
         run: npm run build
@@ -45,3 +51,4 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
