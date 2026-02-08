@@ -20,19 +20,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - name: Upgrade npm (avoids "Exit handler never called")
-        run: npm i -g npm@latest
+      - name: Use stable npm (avoid "Exit handler never called")
+        run: npm i -g npm@9.9.2
 
       - name: Install dependencies (include dev)
-        run: npm install --include=dev --no-audit --no-fund
         env:
           NODE_ENV: development
           NPM_CONFIG_PRODUCTION: "false"
+        run: npm ci --no-audit --no-fund
 
       - name: Build
         run: npm run build
@@ -51,4 +51,3 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
-
