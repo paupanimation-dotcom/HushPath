@@ -22,26 +22,27 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
+          cache: npm
 
-      - name: Use stable npm
+      # FIX: tu package-lock trae URLs "resolved" a un registry interno.
+      # Esto las cambia a registry.npmjs.org antes de instalar.
+      - name: Fix package-lock registry URLs
         run: |
-          npm i -g npm@9.9.3
-          npm --version
+          if [ -f package-lock.json ]; then
+            sed -i 's#https://packages.applied-caas-gateway1.internal.api.openai.org/artifactory/api/npm/npm-public/#https://registry.npmjs.org/#g' package-lock.json
+          fi
 
-      - name: Install dependencies (include dev)
+      - name: Install dependencies (with dev)
         env:
           NODE_ENV: development
-          NPM_CONFIG_PRODUCTION: "false"
-        run: |
-          npm cache clean --force
-          npm ci --include=dev --no-audit --no-fund
+          npm_config_production: "false"
+        run: npm ci --include=dev --no-audit --no-fund
 
       - name: Build
-        run: npx vite build
+        run: npm run build
 
       - uses: actions/configure-pages@v5
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
@@ -55,3 +56,4 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
