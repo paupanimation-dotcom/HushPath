@@ -1,19 +1,16 @@
 /**
- * Hushpath Story Engine
+ * Hushpath Story Engine (Web + Desktop)
  *
- * Goal for the web version (GitHub Pages): the game MUST be playable from a browser link.
+ * This build is meant to be playable from a browser link (GitHub Pages).
+ * We do NOT ship a "demo AI" fallback anymore.
  *
- * - Default backend: DEMO (runs 100% in-browser, no installs).
- * - Optional backend: OLLAMA (player runs Ollama locally, the web app calls 127.0.0.1).
+ * Requirement:
+ *   - Player must have Ollama running locally (free) so the web app can call http://127.0.0.1:11434
  *
- * To force Ollama mode on the hosted web build:
- *   add ?backend=ollama to the URL
- *
- * NOTE: Browsers may block calling localhost if Ollama doesn't allow CORS.
+ * If Ollama is not reachable (or CORS blocks it), the UI will show a setup overlay.
  */
 
 import { GameResponse } from "../types";
-import { demoStartNewGame, demoPerformAction, setDemoGenre } from "./storyEngineDemo";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -30,73 +27,121 @@ declare global {
 let chatHistory: ChatMessage[] = [];
 let currentGenre = "High Fantasy";
 
-const OLLAMA_URL = (import.meta.env.VITE_OLLAMA_URL as string) || "http://127.0.0.1:11434";
-const OLLAMA_MODEL = (import.meta.env.VITE_OLLAMA_MODEL as string) || "llama3.2:3b";
+const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
+const DEFAULT_OLLAMA_MODEL = "qwen2.5:14b";
 
-function getBackend(): "demo" | "ollama" {
+function readLocalStorage(key: string, fallback: string): string {
+  try {
+    const v = window?.localStorage?.getItem(key);
+    return (v && v.trim()) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getFromQuery(key: string): string {
   try {
     const qp = new URLSearchParams(window.location.search);
-    const b = (qp.get("backend") || "").toLowerCase();
-    if (b === "ollama") return "ollama";
+    return (qp.get(key) || "").trim();
   } catch {
-    // ignore
+    return "";
   }
-  const env = String((import.meta.env.VITE_AI_BACKEND as string) || "demo").toLowerCase();
-  return env === "ollama" ? "ollama" : "demo";
+}
+
+export function getOllamaUrl(): string {
+  const qp = getFromQuery("ollama");
+  if (qp) return qp;
+  return (
+    (import.meta.env.VITE_OLLAMA_URL as string) ||
+    readLocalStorage("hushpath_ollama_url", DEFAULT_OLLAMA_URL) ||
+    DEFAULT_OLLAMA_URL
+  );
+}
+
+export function getOllamaModel(): string {
+  const qp = getFromQuery("model");
+  if (qp) return qp;
+  return (
+    (import.meta.env.VITE_OLLAMA_MODEL as string) ||
+    readLocalStorage("hushpath_ollama_model", DEFAULT_OLLAMA_MODEL) ||
+    DEFAULT_OLLAMA_MODEL
+  );
 }
 
 export const setGameGenre = (genre: string) => {
   currentGenre = genre;
-  setDemoGenre(genre);
 };
 
 const getSystemInstruction = (genre: string) => `
-You are the Engine for "Hushpath", a high-end text RPG.
-SETTING: ${genre}
+You are the Engine for "Hushpath", a serious, replayable text RPG.
+SETTING / GENRE: ${genre}
 
-MANDATE:
-1) RESPONSE FORMAT: Strict JSON ONLY. No markdown. No commentary.
-2) REQUIRED FIELDS (always include all of them):
-   - narrative (string, under 60 words)
-   - visualDescription (string): short image prompt (10-20 words) OR empty string "" if no meaningful scene change
-   - mapArt (string): 30 chars wide x 16 lines tall ASCII sector map
-   - mapCoordinates (object): {x:int, y:int} sector id. Start is {0,0}. Only change when leaving the sector.
-   - playerState (object) with: name, class, appearance, characterDescription, hp, maxHp, mana, maxMana, level, xp, gold, location, inventory[], statusEffects[], turn, journal[]
-   - suggestedActions (array of EXACTLY 4 strings): [Logical, Logical, Evil, Silly]
-   - requiresChoice (boolean)
-   - gameOver (boolean)
+You MUST respond with STRICT JSON ONLY. No markdown. No extra text.
 
-3) VISUALS (visualDescription):
-   - You do NOT draw ASCII art anymore.
-   - Output a short image prompt for the CURRENT scene.
-   - Avoid any text/signs/letters.
-   - Only output a new visualDescription on meaningful changes. Otherwise output "".
+REQUIRED FIELDS (always include ALL of them):
+- narrative: string (max 60 words)
+- visualDescription: string (10-20 words) OR "" when no scene change
+- mapArt: string (30 chars wide x 16 lines tall ASCII sector map)
+- mapCoordinates: object {x:int, y:int} (start {0,0}; only change when player leaves the sector)
+- playerState: object with:
+  name, class, appearance, characterDescription,
+  hp, maxHp, mana, maxMana,
+  level, xp, gold,
+  location,
+  inventory: string[],
+  statusEffects: string[],
+  turn: int,
+  journal: string[]
+- suggestedActions: array of EXACTLY 4 UNIQUE strings:
+  [Logical, Logical, Evil, Silly]
+- requiresChoice: boolean
+- gameOver: boolean
 
-4) MAP:
-   - mapArt must include an 'X' marking the player.
-   - Use # for walls, . for floor/path, ~ for water, ^ for hills/rocks, * for special.
+GAMEPLAY RULES:
+- Always acknowledge the PLAYER ACTION and evolve the world state.
+- Increment playerState.turn by +1 each response.
+- suggestedActions must be contextual, non-repetitive, and MUST NOT ignore the player's last action.
+  (Do NOT output the same four actions every turn.)
+- Keep the story consistent and playable.
 
-5) CHARACTER DESCRIPTION:
-   - characterDescription max 10-15 words.
-   - Only change it if appearance meaningfully changes.
+VISUALS:
+- You DO NOT draw ASCII art.
+- visualDescription is a compact prompt for a monochrome silhouette scene.
+- Avoid words like "text", "letters", "sign", "logo".
+- Do NOT include seed numbers.
 
-Stay consistent. Keep it playable.
+MAP:
+- mapArt must contain exactly one 'X' marking the player.
+- Use # walls, . floor/path, ~ water, ^ hills/rocks, * special.
+
+CHARACTER DESCRIPTION:
+- characterDescription is 10-15 words, only change it if appearance meaningfully changes.
 `;
 
 function stripCodeFences(s: string): string {
   return s.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
 }
 
-function extractFirstJsonObject(text: string): string {
+function extractFirstJson(text: string): string {
   const t = stripCodeFences(text);
   const first = t.indexOf("{");
-  const last = t.lastIndexOf("}");
-  if (first >= 0 && last > first) return t.slice(first, last + 1);
+  if (first < 0) return t;
+
+  // walk braces to find a valid first JSON object
+  let depth = 0;
+  for (let i = first; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return t.slice(first, i + 1);
+    }
+  }
   return t;
 }
 
 function safeParseJson(text: string): any {
-  const candidate = extractFirstJsonObject(text);
+  const candidate = extractFirstJson(text);
   try {
     return JSON.parse(candidate);
   } catch {
@@ -121,17 +166,28 @@ function normalizeResponse(obj: any): GameResponse {
     gameOver: Boolean(obj?.gameOver ?? false),
   };
 
-  const defaults = ["Look around", "Check inventory", "Do something evil", "Do something silly"];
-  while (res.suggestedActions.length < 4) res.suggestedActions.push(defaults[res.suggestedActions.length]);
-  if (res.suggestedActions.length > 4) res.suggestedActions = res.suggestedActions.slice(0, 4);
-
   if (!res.playerState) throw new Error("Model response missing playerState");
   if (!res.narrative) res.narrative = "...";
   if (typeof res.visualDescription !== "string") res.visualDescription = "";
+
+  // Ensure suggestedActions are always 4 unique strings
+  const defaults = ["Look around", "Check inventory", "Do something evil", "Do something silly"];
+  const uniq: string[] = [];
+  for (const a of res.suggestedActions) {
+    const s = String(a || "").trim();
+    if (!s) continue;
+    if (!uniq.some((u) => u.toLowerCase() === s.toLowerCase())) uniq.push(s);
+  }
+  for (const d of defaults) {
+    if (uniq.length >= 4) break;
+    if (!uniq.some((u) => u.toLowerCase() === d.toLowerCase())) uniq.push(d);
+  }
+  res.suggestedActions = uniq.slice(0, 4);
+
   return res;
 }
 
-async function callWithRetry<T>(fn: () => Promise<T>, retries = 1, delay = 400): Promise<T> {
+async function callWithRetry<T>(fn: () => Promise<T>, retries = 1, delay = 450): Promise<T> {
   try {
     return await fn();
   } catch (err) {
@@ -143,11 +199,16 @@ async function callWithRetry<T>(fn: () => Promise<T>, retries = 1, delay = 400):
 
 async function ollamaChat(messages: ChatMessage[]): Promise<string> {
   const body = {
-    model: OLLAMA_MODEL,
+    model: getOllamaModel(),
     messages,
     stream: false,
     format: "json",
-    options: { temperature: 0.8, num_ctx: 4096 },
+    options: {
+      temperature: 0.75,
+      top_p: 0.9,
+      repeat_penalty: 1.12,
+      num_ctx: 8192,
+    },
   };
 
   // Desktop build (IPC bridge avoids CORS for file:// origin)
@@ -156,9 +217,9 @@ async function ollamaChat(messages: ChatMessage[]): Promise<string> {
     return String(res?.message?.content ?? res?.response ?? "");
   }
 
-  // Web build
+  const url = getOllamaUrl();
   const res = await callWithRetry(() =>
-    fetch(`${OLLAMA_URL}/api/chat`, {
+    fetch(`${url}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -175,10 +236,15 @@ async function ollamaChat(messages: ChatMessage[]): Promise<string> {
 
 async function ollamaGenerate(prompt: string): Promise<string> {
   const body = {
-    model: OLLAMA_MODEL,
+    model: getOllamaModel(),
     prompt,
     stream: false,
-    options: { temperature: 0.7, num_ctx: 2048 },
+    options: {
+      temperature: 0.7,
+      top_p: 0.9,
+      repeat_penalty: 1.12,
+      num_ctx: 4096,
+    },
   };
 
   if (typeof window !== "undefined" && window.hushpathDesktop?.ollamaGenerate) {
@@ -186,8 +252,9 @@ async function ollamaGenerate(prompt: string): Promise<string> {
     return String(res?.response ?? "");
   }
 
+  const url = getOllamaUrl();
   const res = await callWithRetry(() =>
-    fetch(`${OLLAMA_URL}/api/generate`, {
+    fetch(`${url}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -203,49 +270,43 @@ async function ollamaGenerate(prompt: string): Promise<string> {
 }
 
 export const startNewGame = async (playerLook: string): Promise<GameResponse> => {
-  const backend = getBackend();
-  if (backend !== "ollama") return demoStartNewGame(playerLook);
-
   chatHistory = [{ role: "system", content: getSystemInstruction(currentGenre) }];
-  const prompt = `START GAME. Player appearance: ${playerLook}.\nDescribe where we start.\nProvide visualDescription for the opening scene.\nProvide mapArt and mapCoordinates: {x:0, y:0}.`;
+
+  const prompt = [
+    `START GAME`,
+    `Player appearance: ${playerLook}`,
+    `Open with a strong scene hook.`,
+    `Remember: JSON only, include ALL required fields.`,
+    `Start at mapCoordinates {"x":0,"y":0} and turn=1.`,
+  ].join("\n");
+
   chatHistory.push({ role: "user", content: prompt });
 
-  try {
-    const assistantText = await ollamaChat(chatHistory);
-    chatHistory.push({ role: "assistant", content: assistantText });
-    const obj = safeParseJson(assistantText);
-    return normalizeResponse(obj);
-  } catch {
-    // If Ollama isn't reachable (common on GitHub Pages), fall back.
-    return demoStartNewGame(playerLook);
-  }
+  const assistantText = await ollamaChat(chatHistory);
+  chatHistory.push({ role: "assistant", content: assistantText });
+  const obj = safeParseJson(assistantText);
+  return normalizeResponse(obj);
 };
 
 export const performAction = async (action: string): Promise<GameResponse> => {
-  const backend = getBackend();
-  if (backend !== "ollama") return demoPerformAction(action);
-  if (chatHistory.length === 0) return demoPerformAction(action);
-
-  chatHistory.push({ role: "user", content: action });
-  try {
-    const assistantText = await ollamaChat(chatHistory);
-    chatHistory.push({ role: "assistant", content: assistantText });
-    const obj = safeParseJson(assistantText);
-    return normalizeResponse(obj);
-  } catch {
-    return demoPerformAction(action);
+  if (chatHistory.length === 0) {
+    // If the page reloaded mid-game, force a restart flow in the UI.
+    throw new Error("Game not initialized");
   }
+
+  chatHistory.push({ role: "user", content: `PLAYER ACTION: ${action}` });
+
+  const assistantText = await ollamaChat(chatHistory);
+  chatHistory.push({ role: "assistant", content: assistantText });
+  const obj = safeParseJson(assistantText);
+  return normalizeResponse(obj);
 };
 
 export const getAscii = async (prompt: string, dims: string = "80x30"): Promise<string> => {
-  const backend = getBackend();
-  if (backend !== "ollama") {
-    // In demo mode, we don't ask an LLM for ASCII. Keep it simple.
-    return "";
-  }
   const req = `Generate ASCII ART only.\nDimensions: ${dims}.\nTheme: ${prompt}.\nRules: no markdown, art only. Use: /\\|_-.' ,:;()[]{}<>~+*#@ and whitespace.`;
   const txt = await ollamaGenerate(req);
   return stripCodeFences(txt);
 };
 
-export const getPortraitAscii = async (desc: string): Promise<string> => getAscii(`Full body standing character silhouette, ${desc}`, "40x50");
+export const getPortraitAscii = async (desc: string): Promise<string> =>
+  getAscii(`Full body standing character silhouette, ${desc}`, "40x50");

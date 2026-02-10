@@ -28,18 +28,19 @@ export const ASPECT_CORRECTION = 0.55; // monospace chars are taller than wide
 
 export const DEFAULT_SCENE_SETTINGS: AsciiSettings = {
   width: 80,
-  contrast: 1.35,
+  // Higher contrast + simpler ramp makes silhouettes much cleaner/legible.
+  contrast: 1.8,
   inverted: false,
-  rampIndex: 0,
-  threshold: 0.1,
+  rampIndex: 1,
+  threshold: 0.22,
 };
 
 export const DEFAULT_PORTRAIT_SETTINGS: AsciiSettings = {
   width: 40,
-  contrast: 1.35,
+  contrast: 1.8,
   inverted: false,
-  rampIndex: 0,
-  threshold: 0.1,
+  rampIndex: 1,
+  threshold: 0.22,
 };
 
 declare global {
@@ -88,50 +89,159 @@ function proceduralSilhouette(prompt: string, aspectRatio: string): string {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, width, height);
 
-  // deterministic random shapes (white) based on prompt
-  const seed = hashString(prompt);
+  // Deterministic shapes (white) based on prompt keywords.
+  // This produces varied, readable silhouettes even when no image model is available.
+  const words = String(prompt || "").toLowerCase();
+  const seed = hashString(words);
   const rnd = mulberry32(seed);
-  ctx.fillStyle = "#fff";
 
-  // a big central shape
-  const cx = width * 0.5;
-  const cy = height * 0.55;
-  const mainW = width * (0.25 + rnd() * 0.25);
-  const mainH = height * (0.35 + rnd() * 0.25);
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, mainW, mainH, 0, 0, Math.PI * 2);
-  ctx.fill();
+  const has = (k: string) => words.includes(k);
 
-  // cut-outs to hint at "details" while keeping silhouette style
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.fillStyle = "#000";
-  const cutCount = 3 + Math.floor(rnd() * 5);
-  for (let i = 0; i < cutCount; i++) {
-    const rx = cx + (rnd() - 0.5) * mainW * 0.8;
-    const ry = cy + (rnd() - 0.5) * mainH * 0.8;
-    const rw = mainW * (0.08 + rnd() * 0.12);
-    const rh = mainH * (0.08 + rnd() * 0.12);
+  // Simple drawing helpers (all in silhouette language)
+  const fillWhite = () => {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#fff";
+  };
+  const cutBlack = () => {
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "#000";
+    ctx.strokeStyle = "#000";
+  };
+  const circle = (x: number, y: number, r: number) => {
     ctx.beginPath();
-    ctx.ellipse(rx, ry, rw, rh, 0, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
+  };
+  const rect = (x: number, y: number, w: number, h: number) => {
+    ctx.fillRect(x, y, w, h);
+  };
+  const tri = (x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.lineTo(x3, y3);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  const cx = width * 0.5;
+  const groundY = height * (0.72 + (rnd() - 0.5) * 0.05);
+
+  fillWhite();
+  // optional horizon / ground line (keeps silhouettes anchored)
+  if (rnd() < 0.75) {
+    rect(0, groundY, width, Math.max(2, height * 0.02));
   }
 
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "#fff";
+  const drawMask = () => {
+    const w = width * (0.32 + rnd() * 0.08);
+    const h = height * (0.36 + rnd() * 0.08);
+    const x = cx - w / 2;
+    const y = groundY - h;
 
-  // extra small shapes around (keeps it readable after ASCII)
-  const specks = 4 + Math.floor(rnd() * 8);
+    // rounded-ish mask
+    rect(x, y, w, h);
+    circle(x, y + h * 0.18, w * 0.22);
+    circle(x + w, y + h * 0.18, w * 0.22);
+    circle(x, y + h * 0.82, w * 0.22);
+    circle(x + w, y + h * 0.82, w * 0.22);
+
+    // eye cutouts
+    cutBlack();
+    circle(cx - w * 0.18, y + h * 0.45, w * 0.09);
+    circle(cx + w * 0.18, y + h * 0.45, w * 0.09);
+    fillWhite();
+  };
+
+  const drawHouse = () => {
+    const w = width * (0.34 + rnd() * 0.1);
+    const h = height * (0.26 + rnd() * 0.08);
+    const x = cx - w / 2;
+    const y = groundY - h;
+    rect(x, y, w, h);
+    tri(x - w * 0.05, y, cx, y - h * 0.55, x + w * 1.05, y);
+
+    // door cutout
+    cutBlack();
+    const dw = w * 0.18;
+    const dh = h * 0.55;
+    rect(cx - dw / 2, groundY - dh, dw, dh);
+    fillWhite();
+  };
+
+  const drawTree = (x: number) => {
+    const trunkW = width * (0.03 + rnd() * 0.02);
+    const trunkH = height * (0.12 + rnd() * 0.06);
+    rect(x - trunkW / 2, groundY - trunkH, trunkW, trunkH);
+    circle(x, groundY - trunkH, width * (0.06 + rnd() * 0.03));
+  };
+
+  const drawRock = () => {
+    const w = width * (0.22 + rnd() * 0.1);
+    const h = height * (0.14 + rnd() * 0.06);
+    const x = cx - w / 2;
+    const y = groundY - h;
+    ctx.beginPath();
+    ctx.moveTo(x, groundY);
+    ctx.lineTo(x + w * 0.15, y + h * 0.2);
+    ctx.lineTo(cx, y);
+    ctx.lineTo(x + w * 0.85, y + h * 0.25);
+    ctx.lineTo(x + w, groundY);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  // Choose a primary silhouette based on prompt keywords.
+  const primary =
+    has("mask") || has("skull") || has("face")
+      ? "mask"
+      : has("house") || has("hut") || has("cabin") || has("door")
+      ? "house"
+      : has("forest") || has("tree") || has("woods") || has("marsh")
+      ? "trees"
+      : has("mountain") || has("ridge") || has("cliff")
+      ? "rock"
+      : rnd() < 0.25
+      ? "mask"
+      : rnd() < 0.55
+      ? "house"
+      : "rock";
+
+  if (primary === "mask") drawMask();
+  else if (primary === "house") drawHouse();
+  else if (primary === "rock") drawRock();
+  else {
+    // trees cluster
+    const count = 3 + Math.floor(rnd() * 4);
+    const spread = width * 0.28;
+    for (let i = 0; i < count; i++) {
+      drawTree(cx + (rnd() - 0.5) * spread);
+    }
+  }
+
+  // Secondary context silhouettes (kept minimal so ASCII stays clean)
+  if (has("moon") || has("night") || has("dark") || rnd() < 0.35) {
+    circle(width * (0.18 + rnd() * 0.2), height * (0.18 + rnd() * 0.15), width * (0.04 + rnd() * 0.02));
+  }
+  if (has("fog") || has("mist") || has("marsh") || rnd() < 0.35) {
+    // thin fog bands (very subtle)
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#fff";
+    const bands = 2 + Math.floor(rnd() * 3);
+    for (let i = 0; i < bands; i++) {
+      const y = height * (0.55 + rnd() * 0.25);
+      rect(0, y, width, Math.max(2, height * 0.01));
+    }
+  }
+
+  // Small specks for texture (limited)
+  const specks = 2 + Math.floor(rnd() * 4);
+  fillWhite();
   for (let i = 0; i < specks; i++) {
     const x = width * (0.15 + rnd() * 0.7);
-    const y = height * (0.15 + rnd() * 0.7);
-    const r = Math.max(2, Math.floor(6 + rnd() * 16));
-    if (rnd() < 0.5) {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    }
+    const y = height * (0.15 + rnd() * 0.55);
+    circle(x, y, Math.max(2, Math.floor(4 + rnd() * 10)));
   }
 
   return canvas.toDataURL("image/png");

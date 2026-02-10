@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { startNewGame, performAction, getAscii, getPortraitAscii, setGameGenre } from './services/storyEngine';
+import { startNewGame, performAction, getAscii, getPortraitAscii, setGameGenre, getOllamaUrl } from './services/storyEngine';
 import { generateAsciiFromPrompt, DEFAULT_SCENE_SETTINGS, DEFAULT_PORTRAIT_SETTINGS } from './services/asciiImageService';
 import { GameResponse, GameStatus, LogEntry, PlayerState, StoryPanel } from './types';
 import { StatBar } from './components/StatBar';
@@ -12,6 +12,7 @@ import { AsciiLoader } from './components/AsciiLoader';
 import { InteractiveMap } from './components/InteractiveMap';
 import { StoryView } from './components/StoryView';
 import { AiSetupOverlay } from './components/AiSetupOverlay';
+import { OllamaRequiredOverlay } from './components/OllamaRequiredOverlay';
 
 const INITIAL_PLAYER: PlayerState = {
   name: "Traveler", class: "Unknown", appearance: "Hooded", characterDescription: "A mystery",
@@ -231,19 +232,25 @@ const GENRE_PLACEHOLDERS: Record<string, string> = {
 
 export default function App() {
   const [aiChecked, setAiChecked] = useState(false);
-  const [aiReady, setAiReady] = useState(true);
+  const [aiReady, setAiReady] = useState(false);
 
-  // On desktop builds, ensure the local open-source AI engines/models are installed.
+  // AI bootstrap:
+  // - Desktop builds: use bundled local installers (AiSetupOverlay).
+  // - Web builds (GitHub Pages): require Ollama running locally.
   useEffect(() => {
     (async () => {
       try {
-        if (!window.hushpathDesktop?.aiStatus) {
-          setAiReady(true);
-          setAiChecked(true);
+        // Desktop build
+        if (window.hushpathDesktop?.aiStatus) {
+          const st = await window.hushpathDesktop.aiStatus();
+          setAiReady(!!st.ok);
           return;
         }
-        const st = await window.hushpathDesktop.aiStatus();
-        setAiReady(!!st.ok);
+
+        // Web build: ping Ollama.
+        const url = getOllamaUrl().replace(/\/$/, '');
+        const r = await fetch(`${url}/api/tags`, { method: 'GET' });
+        setAiReady(r.ok);
       } catch {
         setAiReady(false);
       } finally {
@@ -274,9 +281,14 @@ export default function App() {
     );
   }
 
-  // Block the game until the free local AI components are installed (desktop build only).
+  // Block the game until AI is available.
   if (aiChecked && !aiReady) {
-    return <AiSetupOverlay onReady={() => setAiReady(true)} />;
+    // Desktop build
+    if (hasDesktopAI) {
+      return <AiSetupOverlay onReady={() => setAiReady(true)} />;
+    }
+    // Web build
+    return <OllamaRequiredOverlay onReady={() => setAiReady(true)} />;
   }
 
   return <AppInner />;
